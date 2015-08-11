@@ -42,20 +42,20 @@ public class DevLoader extends WebappLoader {
 		WebappClassLoader devCl = (WebappClassLoader) cl;
 
 		String webappWorkLoaderDir = buildWebappWorkLoaderDir(devCl.canonicalLoaderDir);
-		
+
 		List webClassPathEntries = readWebClassPathEntries();
 		StringBuffer classpath = new StringBuffer();
 		for (Iterator it = webClassPathEntries.iterator(); it.hasNext();) {
 			String entry = (String) it.next();
-			
+
 			if (null == entry) {
 				continue;
 			}
-			
+
 			if (entry.startsWith("/")) {
 				entry = buildDependencyClassPath(webappWorkLoaderDir, entry);
 			}
-			
+
 			File f = new File(entry);
 			if (f.exists()) {
 				if ((f.isDirectory()) && (!entry.endsWith("/"))) {
@@ -92,6 +92,9 @@ public class DevLoader extends WebappLoader {
 			classpath.append(token + File.pathSeparatorChar);
 		}
 		getServletContext().setAttribute("org.apache.catalina.jsp_classpath", classpath.toString());
+		
+		log("dev loading finished!");
+		log("webserver is starting...");
 	}
 
 	protected void log(String msg) {
@@ -201,45 +204,65 @@ public class DevLoader extends WebappLoader {
 		return sb.toString();
 	}
 
+	/**
+	 * 构建依赖路径
+	 * 
+	 * @param webappWorkLoaderDir
+	 *            例如：E:/dahuang_workspace/iots/
+	 * @param entry
+	 *            例如：/dahuangit-base
+	 * @return
+	 */
 	private String buildDependencyClassPath(String webappWorkLoaderDir, String entry) {
 		String path = "/target/classes";
 
-		// webappWorkLoaderDir=E:/dahuang_workspace/iots/
-		// entry=/dahuangit-base
-
 		// 向下级目录进行查找
-		String dir = findDir(webappWorkLoaderDir, entry);
+		String dir = findDirInChilds(webappWorkLoaderDir, entry);
 
 		if (null != dir) {
 			return dir + path;
 		}
 
-		// 如果下级目录找不到，则向除了本目录的上级目录之外的平级目录进行查找(以后需要考虑上上级甚至更高级目录的查找情况)
-		File baseDirFile = new File(webappWorkLoaderDir);
-		File pf = baseDirFile.getParentFile();
-
-		File[] childFiles = pf.listFiles();
-
-		for (File child : childFiles) {
-			String fileName = child.getName();
-
-			// 如果是本目录的上级目录，则跳过
-			if (baseDirFile.getName().equals(fileName)) {
-				continue;
-			}
-
-			// 如果是目录中含有完整名字，则表明找到了,不用再继续找了
-			if (entry.indexOf(fileName) > 0) {
-				return child.getAbsolutePath() + path;
-			}
+		dir = findDirInAncestors(webappWorkLoaderDir, entry);
+		if (null != dir) {
+			return dir + path;
 		}
 
-		logError("目录[" + entry + "]不存在，请检查配置!");
+		// 如果下级目录找不到，则向除了本目录的上级目录之外的平级目录进行查找(以后需要考虑上上级甚至更高级目录的查找情况)
+		// File baseDirFile = new File(webappWorkLoaderDir);
+		// File pf = baseDirFile.getParentFile();
+		//
+		// File[] childFiles = pf.listFiles();
+		//
+		// for (File child : childFiles) {
+		// String fileName = child.getName();
+		//
+		// // 如果是本目录的上级目录，则跳过
+		// if (baseDirFile.getName().equals(fileName)) {
+		// continue;
+		// }
+		//
+		// // 如果是目录中含有完整名字，则表明找到了,不用再继续找了
+		// if (entry.indexOf(fileName) > 0) {
+		// return child.getAbsolutePath() + path;
+		// }
+		// }
+		//
+		// logError("目录[" + entry + "]不存在，请检查配置!");
 
 		return null;
 	}
 
-	private static String findDir(String baseDir, String targetDir) {
+	/**
+	 * 在子目录里查找目标目录
+	 * 
+	 * @param baseDir
+	 *            基础目录
+	 * @param targetDir
+	 *            要查找的目标目录
+	 * @return
+	 */
+	private static String findDirInChilds(String baseDir, String targetDir) {
 		File baseDirFile = new File(baseDir);
 
 		try {
@@ -247,13 +270,18 @@ public class DevLoader extends WebappLoader {
 
 			for (File childFile : childFiles) {
 				String fileName = childFile.getName();
+
+				if (!childFile.isDirectory() || fileName.startsWith(".")) {
+					continue;
+				}
+
 				fileName = "/" + fileName;
 
 				if (fileName.indexOf("-") > -1) {
 					if (fileName.equals(targetDir)) {
 						return baseDir + targetDir;
 					} else {
-						String s = findDir(childFile.getAbsolutePath(), targetDir);
+						String s = findDirInChilds(childFile.getAbsolutePath(), targetDir);
 						if (null != s) {
 							return s;
 						}
@@ -261,7 +289,57 @@ public class DevLoader extends WebappLoader {
 				}
 			}
 		} catch (Exception e) {
-			// e.printStackTrace();
+		}
+
+		return null;
+	}
+
+	/**
+	 * 在父级目录里查找目标目录
+	 * 
+	 * @param baseDir
+	 *            基础目录
+	 * @param targetDir
+	 *            要查找的目标目录
+	 * @return
+	 */
+	private static String findDirInAncestors(String baseDir, String targetDir) {
+		File baseDirFile = new File(baseDir);
+
+		try {
+			File[] childFiles = baseDirFile.getParentFile().listFiles();
+
+			File lastFile = null;
+
+			for (File childFile : childFiles) {
+				String fileName = childFile.getName();
+
+				if (!childFile.isDirectory() || fileName.startsWith(".")) {
+					continue;
+				}
+
+				// 如果是本目录的上级目录，则跳过
+				if (baseDirFile.getName().equals(fileName)) {
+					continue;
+				}
+
+				fileName = "/" + fileName;
+
+				if (fileName.indexOf("-") > -1) {
+					if (fileName.equals(targetDir)) {
+						return childFile.getAbsolutePath();
+					}
+				}
+
+				lastFile = childFile;
+			}
+
+			String s = findDirInAncestors(lastFile.getParentFile().getAbsolutePath(), targetDir);
+			if (null != s) {
+				return s;
+			}
+
+		} catch (Exception e) {
 		}
 
 		return null;
